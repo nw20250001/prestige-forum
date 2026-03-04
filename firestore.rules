@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    function isStaff() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'moderator'];
+    }
+    function nicknameAllowed(n) {
+      return !(n is string) || !n.matches('.*(管理員|壇主).*');
+    }
+    function nicknameValidForCreate() {
+      return !(request.resource.data.keys().hasAny(['nickname']) &&
+               !nicknameAllowed(request.resource.data.nickname));
+    }
+    function nicknameValidForUpdate() {
+      return !(request.resource.data.keys().hasAny(['nickname']) &&
+               request.resource.data.nickname != resource.data.nickname &&
+               !nicknameAllowed(request.resource.data.nickname));
+    }
+    function isViewCountIncrement() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly(['viewCount']) &&
+        request.resource.data.viewCount is int &&
+        (
+          (!(resource.data.viewCount is int) && request.resource.data.viewCount == 1) ||
+          ((resource.data.viewCount is int) && request.resource.data.viewCount == resource.data.viewCount + 1)
+        );
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.auth.uid == userId && nicknameValidForCreate() && (
+        request.resource.data.role == 'user' ||
+        (request.auth.token.email == 'istage.eason@gmail.com' && request.resource.data.role == 'admin')
+      );
+      allow update: if isSignedIn() && nicknameValidForUpdate() && (
+        (request.auth.uid == userId && (
+          request.resource.data.role == resource.data.role ||
+          (request.auth.token.email == 'istage.eason@gmail.com' && request.resource.data.role == 'admin')
+        ))
+        || isAdmin()
+      );
+      allow delete: if isSignedIn() && isAdmin() && request.auth.uid != userId;
+    }
+
+    match /posts/{postId} {
+        allow read: if true;
+        allow create: if isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.canPost != false;
+        allow update: if (isSignedIn() && (request.auth.uid == resource.data.authorId || isStaff())) || isViewCountIncrement();
+        allow delete: if isSignedIn() && (request.auth.uid == resource.data.authorId || isStaff());
+        
+        match /comments/{commentId} {
+          allow read: if true;
+          allow create: if isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.canComment != false;
+          allow update, delete: if isSignedIn() && (
+            request.auth.uid == resource.data.authorId || isStaff()
+          );
+        }
+      }
+  }
+}
