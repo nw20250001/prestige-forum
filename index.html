@@ -72,8 +72,18 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-analytics-compat.js"></script>
 
     <!-- Application Logic -->
+    <script>
+        window.onerror = function(message, source, lineno, colno, error) {
+            console.error(message, error);
+            const errDiv = document.createElement('div');
+            errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:red;color:white;padding:10px;z-index:9999;';
+            errDiv.textContent = '系統錯誤: ' + message + ' (' + source + ':' + lineno + ')';
+            document.body.appendChild(errDiv);
+        };
+    </script>
     <script src="js/firebase-config.js"></script>
     <script src="js/app.js"></script>
 </body>

@@ -33,14 +33,16 @@ function init() {
             const userDoc = await firebase.firestore().collection('users').doc(user.uid).get();
             if (userDoc.exists) {
                 appState.role = userDoc.data().role || 'user';
+                appState.userProfile = userDoc.data();
+
+                // 自動設置管理員
+                if (user.email === 'istage.eason@gmail.com' && appState.role !== 'admin') {
+                    await firebase.firestore().collection('users').doc(user.uid).update({ role: 'admin' });
+                    appState.role = 'admin';
+                }
             } else {
-                // 首次登入，創建用戶資料
-                await firebase.firestore().collection('users').doc(user.uid).set({
-                    email: user.email,
-                    role: 'user', // 預設角色
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
                 appState.role = 'user';
+                appState.userProfile = {};
             }
         } else {
             appState.role = 'guest';
@@ -125,13 +127,13 @@ function renderNav() {
 
     if (appState.user) {
         authButtonsContainer.innerHTML = `
-            <span class="text-sm text-gray-500 mr-2">嗨, ${appState.user.email} (${getRoleLabel(appState.role)})</span>
+            <span class="text-sm text-gray-500 mr-2">嗨, ${appState.userProfile?.nickname || appState.user.displayName || appState.user.email} (${getRoleLabel(appState.role)})</span>
             <button onclick="logout()" class="text-sm text-gray-700 hover:text-black font-medium">登出</button>
         `;
     } else {
         authButtonsContainer.innerHTML = `
             <a href="#login" class="text-sm text-gray-700 hover:text-black font-medium mr-4">登入</a>
-            <a href="#login" class="bg-black text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-800 transition">註冊</a>
+            <a href="#register" class="bg-black text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-800 transition">註冊</a>
         `;
     }
 }
@@ -180,9 +182,9 @@ async function renderHome() {
                     <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
                         <div class="flex items-center">
                             <div class="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600">
-                                ${post.authorEmail ? post.authorEmail[0].toUpperCase() : 'U'}
+                                ${(post.authorName || post.authorEmail || 'U')[0].toUpperCase()}
                             </div>
-                            <span class="ml-2 text-sm text-gray-600 truncate max-w-[100px]">${post.authorEmail.split('@')[0]}</span>
+                            <span class="ml-2 text-sm text-gray-600 truncate max-w-[100px]">${post.authorName || post.authorEmail.split('@')[0]}</span>
                         </div>
                         <span class="text-indigo-600 text-sm font-medium hover:text-indigo-500">閱讀更多 &rarr;</span>
                     </div>
@@ -257,7 +259,7 @@ async function renderPost(postId) {
             <div class="mb-6">
                 <h1 class="text-3xl font-bold text-gray-900 mb-2">${post.title}</h1>
                 <div class="flex items-center text-sm text-gray-500">
-                    <span class="font-medium text-gray-900 mr-2">${post.authorEmail.split('@')[0]}</span>
+                    <span class="font-medium text-gray-900 mr-2">${post.authorName || post.authorEmail.split('@')[0]}</span>
                     <span>• ${date}</span>
                 </div>
             </div>
@@ -292,7 +294,7 @@ async function loadComments(postId) {
         commentsList.innerHTML += `
             <div class="bg-gray-50 p-4 rounded-lg">
                 <div class="flex justify-between items-start">
-                    <span class="font-medium text-sm text-gray-900">${comment.authorEmail.split('@')[0]}</span>
+                    <span class="font-medium text-sm text-gray-900">${comment.authorName || comment.authorEmail.split('@')[0]}</span>
                     <span class="text-xs text-gray-500">${date}</span>
                 </div>
                 <p class="text-gray-700 mt-1 text-sm">${comment.content}</p>
@@ -314,9 +316,13 @@ function renderLogin() {
                 </div>
                 <form class="mt-8 space-y-6" id="auth-form" onsubmit="handleAuth(event, 'login')">
                     <div class="rounded-md shadow-sm -space-y-px">
+                        <div id="nickname-field" class="hidden">
+                            <label for="nickname" class="sr-only">暱稱</label>
+                            <input id="nickname" name="nickname" type="text" class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-black focus:border-black focus:z-10 sm:text-sm" placeholder="暱稱 (不可重複)">
+                        </div>
                         <div>
                             <label for="email-address" class="sr-only">Email address</label>
-                            <input id="email-address" name="email" type="email" autocomplete="email" required class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-black focus:border-black focus:z-10 sm:text-sm" placeholder="電子郵件地址">
+                            <input id="email-address" name="email" type="email" autocomplete="email" required class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-black focus:border-black focus:z-10 sm:text-sm" placeholder="電子郵件地址">
                         </div>
                         <div>
                             <label for="password" class="sr-only">Password</label>
@@ -336,18 +342,32 @@ function renderLogin() {
     `;
 }
 
+function renderRegister() {
+    renderLogin();
+    toggleAuthMode('register');
+}
+
 function toggleAuthMode(mode) {
     if (mode === 'register') {
         const title = document.querySelector('h2');
         const link = document.querySelector('p a');
         const btn = document.querySelector('button[type="submit"]');
         const form = document.getElementById('auth-form');
+        const nicknameField = document.getElementById('nickname-field');
+        const emailInput = document.getElementById('email-address');
+        const passwordInput = document.getElementById('password');
         
         title.textContent = '註冊新帳戶';
         link.textContent = '已有帳號？登入';
         link.onclick = () => toggleAuthMode('login');
         btn.textContent = '註冊';
         form.onsubmit = (e) => handleAuth(e, 'register');
+        
+        // 顯示暱稱欄位並調整樣式
+        nicknameField.classList.remove('hidden');
+        nicknameField.querySelector('input').required = true;
+        emailInput.classList.remove('rounded-t-md');
+        passwordInput.classList.add('rounded-b-md');
     } else {
         renderLogin(); // Reset to login
     }
@@ -404,7 +424,8 @@ async function renderAdminDashboard() {
             list.innerHTML += `
                 <li class="px-4 py-4 flex items-center justify-between hover:bg-gray-50">
                     <div>
-                        <p class="text-sm font-medium text-black truncate">${user.email}</p>
+                        <p class="text-sm font-medium text-black truncate">${user.nickname || user.email}</p>
+                        ${user.nickname ? `<p class="text-xs text-gray-500">${user.email}</p>` : ''}
                         <p class="text-xs text-gray-500">ID: ${doc.id}</p>
                     </div>
                     <div class="flex items-center space-x-2">
@@ -463,12 +484,54 @@ async function handleAuth(e, mode) {
         if (mode === 'login') {
             await firebase.auth().signInWithEmailAndPassword(email, password);
         } else {
-            await firebase.auth().createUserWithEmailAndPassword(email, password);
+            // 註冊邏輯
+            const nickname = document.getElementById('nickname').value.trim();
+            if (!nickname) {
+                throw new Error('請輸入暱稱');
+            }
+            
+            // 檢查暱稱唯一性
+            const db = firebase.firestore();
+            const nicknameSnapshot = await db.collection('users').where('nickname', '==', nickname).get();
+            if (!nicknameSnapshot.empty) {
+                throw new Error('此暱稱已被使用，請更換一個');
+            }
+
+            const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            
+            // 更新 Auth Profile
+            await user.updateProfile({
+                displayName: nickname
+            });
+
+            // 建立用戶資料
+            await db.collection('users').doc(user.uid).set({
+                email: user.email,
+                nickname: nickname,
+                role: 'user',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
         }
         window.location.hash = '/'; // Redirect home
     } catch (error) {
-        msg.textContent = error.message;
+        msg.textContent = formatAuthError(error, mode);
     }
+}
+
+function formatAuthError(error, mode) {
+    const code = error?.code || '';
+    if (code === 'auth/invalid-login-credentials') {
+        return mode === 'login'
+            ? '帳號或密碼錯誤，或該帳號尚未註冊。'
+            : '註冊失敗：請確認 Email 格式正確，且此 Email 尚未被註冊。';
+    }
+    if (code === 'auth/email-already-in-use') return '此 Email 已被註冊，請改用登入。';
+    if (code === 'auth/weak-password') return '密碼強度不足，請使用至少 6 個字元。';
+    if (code === 'auth/invalid-email') return 'Email 格式不正確。';
+    if (code === 'auth/operation-not-allowed') return 'Firebase 尚未啟用 Email/Password 登入，請至 Firebase Console 開啟。';
+    if (code === 'auth/network-request-failed') return '網路連線失敗，請檢查網路或防火牆設定。';
+    return error?.message || '發生未知錯誤，請稍後再試。';
 }
 
 async function logout() {
@@ -487,6 +550,7 @@ async function submitPost(e) {
             content,
             authorId: appState.user.uid,
             authorEmail: appState.user.email,
+            authorName: appState.userProfile?.nickname || appState.user.displayName || appState.user.email.split('@')[0],
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             pinned: false
         });
@@ -506,6 +570,7 @@ async function submitComment(postId) {
             content,
             authorId: appState.user.uid,
             authorEmail: appState.user.email,
+            authorName: appState.userProfile?.nickname || appState.user.displayName || appState.user.email.split('@')[0],
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         input.value = '';
