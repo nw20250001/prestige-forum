@@ -35,6 +35,12 @@ service cloud.firestore {
         );
     }
 
+    function isRatingUpdate() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly(['ratingAvg', 'ratingCount']) &&
+        request.resource.data.ratingAvg is number &&
+        request.resource.data.ratingCount is int;
+    }
+
     match /users/{userId} {
       allow read: if true;
       allow create: if isSignedIn() && request.auth.uid == userId && nicknameValidForCreate() && (
@@ -54,9 +60,14 @@ service cloud.firestore {
     match /posts/{postId} {
         allow read: if true;
         allow create: if isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.canPost != false;
-        allow update: if (isSignedIn() && (request.auth.uid == resource.data.authorId || isStaff())) || isViewCountIncrement();
+        allow update: if (isSignedIn() && (request.auth.uid == resource.data.authorId || isStaff())) || isViewCountIncrement() || (isSignedIn() && isRatingUpdate());
         allow delete: if isSignedIn() && (request.auth.uid == resource.data.authorId || isStaff());
         
+        match /ratings/{userId} {
+          allow read: if true;
+          allow write: if isSignedIn() && request.auth.uid == userId;
+        }
+
         match /comments/{commentId} {
           allow read: if true;
           allow create: if isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.canComment != false;

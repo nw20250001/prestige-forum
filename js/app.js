@@ -9,7 +9,14 @@ const appState = {
     role: 'guest', // guest, user, moderator, admin
     currentRoute: '',
     params: {},
+    openTabs: JSON.parse(localStorage.getItem('openTabs')) || [], // { name: 'tagName', route: '#tag/tagName' }
 };
+
+// Ensure "技術論壇" is restored if missing
+if (!appState.openTabs.some(t => t.name === '技術論壇')) {
+    appState.openTabs.push({ name: '技術論壇', route: '#tag/技術論壇' });
+    localStorage.setItem('openTabs', JSON.stringify(appState.openTabs));
+}
 
 // DOM Elements
 const appContainer = document.getElementById('app');
@@ -93,10 +100,22 @@ function handleRoute() {
         case '/':
             renderHome();
             break;
+        case 'tag':
+            const tagName = decodeURIComponent(args[0] || '');
+            if (tagName) renderHome(tagName);
+            else window.location.hash = '/';
+            break;
         case 'post':
             const postId = args[0];
             if (postId) renderPost(postId);
             else window.location.hash = '/';
+            break;
+        case 'my-posts':
+            if (!appState.user) {
+                window.location.hash = '#login';
+                return;
+            }
+            renderHome(null, appState.user.uid);
             break;
         case 'login':
             renderLogin();
@@ -111,8 +130,13 @@ function handleRoute() {
             }
             renderCreatePost();
             break;
+        case 'edit':
+            const editPostId = args[0];
+            if (editPostId) renderEditPost(editPostId);
+            else window.location.hash = '/';
+            break;
         case 'admin':
-            if (appState.role !== 'admin' && appState.role !== 'moderator') {
+            if (appState.role !== 'admin') {
                 window.location.hash = '/';
                 alert('權限不足');
                 return;
@@ -134,6 +158,7 @@ function renderNav() {
     // Home route can be '' or '/' depending on how hash is parsed
     const isHome = current === '' || current === '/' || current === '#/';
     const isCreate = current === 'create';
+    const isMyPosts = current === 'my-posts';
     const isAdmin = current === 'admin';
 
     // Styles
@@ -148,13 +173,22 @@ function renderNav() {
         <a href="#/" class="${baseClass} ${isHome ? activeClass : inactiveClass}">首頁</a>
     `;
 
+    appState.openTabs?.forEach(tab => {
+        const isActive = current === 'tag' && decodeURIComponent(appState.params[0] || '') === tab.name;
+        linksHtml += `<a href="#tag/${encodeURIComponent(tab.name)}" ondblclick="editTagTab('${tab.name}')" class="${baseClass} ${isActive ? activeClass : inactiveClass}">${tab.name}</a>`;
+    });
+
+    if (appState.user && (appState.role === 'admin' || appState.role === 'moderator')) {
+        linksHtml += `
+            <button onclick="addNewTagTab()" class="${baseClass} ${inactiveClass} font-bold text-lg" title="新增標籤分頁">+</button>
+        `;
+    }
+
     if (appState.user) {
-        if (appState.userProfile?.canPost !== false) {
-            linksHtml += `
-                <a href="#create" class="${baseClass} ${isCreate ? activeClass : inactiveClass}">發布文章</a>
-            `;
-        }
-        if (appState.role === 'admin' || appState.role === 'moderator') {
+        linksHtml += `
+            <a href="#my-posts" class="${baseClass} ${isMyPosts ? activeClass : inactiveClass}">歷史文章</a>
+        `;
+        if (appState.role === 'admin') {
             linksHtml += `
                 <a href="#admin" class="${baseClass} ${isAdmin ? activeClass : adminInactiveClass}">管理後台</a>
             `;
@@ -183,12 +217,212 @@ function renderNav() {
     }
 }
 
+function openCreatePostPopup() {
+    const w = Math.floor((window.screen?.availWidth || window.innerWidth || 1200) * 0.8);
+    const h = Math.floor((window.screen?.availHeight || window.innerHeight || 800) * 0.8);
+    const left = Math.floor(((window.screen?.availWidth || window.innerWidth || 1200) - w) / 2);
+    const top = Math.floor(((window.screen?.availHeight || window.innerHeight || 800) - h) / 2);
+    const url = `${window.location.origin}${window.location.pathname}${window.location.search}#create`;
+    const features = `popup=yes,width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+    const win = window.open(url, 'create-post', features);
+    if (win) {
+        win.focus();
+        return;
+    }
+    window.location.hash = '#create';
+}
+
+function addNewTagTab() {
+    openTagModal();
+}
+
+function ensureTagModal() {
+    if (document.getElementById('tag-modal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'tag-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-white w-full max-w-sm rounded-lg shadow-lg p-6">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">新增標籤分頁</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-700 mb-1">標籤名稱</label>
+                    <input id="new-tag-name" type="text" class="w-full border rounded px-3 py-2 focus:ring-black focus:border-black" placeholder="輸入標籤名稱" onkeydown="if(event.key === 'Enter') submitNewTag()">
+                </div>
+                <div class="flex justify-end space-x-2">
+                    <button onclick="closeTagModal()" class="px-4 py-2 rounded border border-gray-300 hover:bg-gray-100">取消</button>
+                    <button onclick="submitNewTag()" class="px-4 py-2 rounded bg-black text-white hover:bg-gray-800">新增</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function openTagModal() {
+    ensureTagModal();
+    const modal = document.getElementById('tag-modal');
+    const input = document.getElementById('new-tag-name');
+    input.value = '';
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    setTimeout(() => input.focus(), 100);
+}
+
+function closeTagModal() {
+    const modal = document.getElementById('tag-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+
+function submitNewTag() {
+    const input = document.getElementById('new-tag-name');
+    const tagName = input.value;
+    
+    if (tagName && tagName.trim()) {
+        const cleanName = tagName.trim();
+        // Check if tab already exists
+        const exists = appState.openTabs.find(t => t.name === cleanName);
+        if (!exists) {
+            appState.openTabs.push({ 
+                name: cleanName, 
+                route: `#tag/${encodeURIComponent(cleanName)}` 
+            });
+            localStorage.setItem('openTabs', JSON.stringify(appState.openTabs));
+        }
+        window.location.hash = `#tag/${encodeURIComponent(cleanName)}`;
+        renderNav(); 
+        closeTagModal();
+    } else {
+        alert('請輸入標籤名稱');
+    }
+}
+
+// --- Edit Tag Modal ---
+let currentEditingTagName = null;
+
+function editTagTab(tagName) {
+    if (!appState.user) return;
+    currentEditingTagName = tagName;
+    ensureEditTagModal();
+    const modal = document.getElementById('edit-tag-modal');
+    const input = document.getElementById('edit-tag-name');
+    input.value = tagName;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    setTimeout(() => input.focus(), 100);
+}
+
+function ensureEditTagModal() {
+    if (document.getElementById('edit-tag-modal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'edit-tag-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-white w-full max-w-sm rounded-lg shadow-lg p-6">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">編輯標籤名稱</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-700 mb-1">新的標籤名稱</label>
+                    <input id="edit-tag-name" type="text" class="w-full border rounded px-3 py-2 focus:ring-black focus:border-black" placeholder="輸入標籤名稱" onkeydown="if(event.key === 'Enter') submitEditTag()">
+                </div>
+                <div class="flex justify-end space-x-2">
+                    <button onclick="closeEditTagModal()" class="px-4 py-2 rounded border border-gray-300 hover:bg-gray-100">取消</button>
+                    <button onclick="submitEditTag()" class="px-4 py-2 rounded bg-black text-white hover:bg-gray-800">儲存</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function closeEditTagModal() {
+    const modal = document.getElementById('edit-tag-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    currentEditingTagName = null;
+}
+
+async function submitEditTag() {
+    const input = document.getElementById('edit-tag-name');
+    const newName = input.value.trim();
+    
+    if (!newName) {
+        alert('請輸入標籤名稱');
+        return;
+    }
+    
+    if (newName === currentEditingTagName) {
+        closeEditTagModal();
+        return;
+    }
+
+    // Check if new name already exists
+    if (appState.openTabs.some(t => t.name === newName)) {
+        alert('此標籤名稱已存在');
+        return;
+    }
+
+    try {
+        // 1. Update appState
+        const tabIndex = appState.openTabs.findIndex(t => t.name === currentEditingTagName);
+        if (tabIndex !== -1) {
+            appState.openTabs[tabIndex].name = newName;
+            appState.openTabs[tabIndex].route = `#tag/${encodeURIComponent(newName)}`;
+            localStorage.setItem('openTabs', JSON.stringify(appState.openTabs));
+        }
+
+        // 2. Update Firestore posts (Batch update)
+        // Note: This is a heavy operation if there are many posts. 
+        // For a prototype, we'll do a client-side query and batch write.
+        const db = firebase.firestore();
+        const batch = db.batch();
+        const snapshot = await db.collection('posts').where('tag', '==', currentEditingTagName).get();
+        
+        let count = 0;
+        snapshot.forEach(doc => {
+            batch.update(doc.ref, { tag: newName });
+            count++;
+        });
+
+        if (count > 0) {
+            await batch.commit();
+        }
+
+        // 3. Update UI
+        closeEditTagModal();
+        
+        // If we are currently on the old tag page, redirect to new one
+        if (appState.currentRoute === 'tag' && decodeURIComponent(appState.params[0]) === currentEditingTagName) {
+             window.location.hash = `#tag/${encodeURIComponent(newName)}`;
+        } else {
+             renderNav();
+        }
+        
+        // If we are on home page or other list pages, we might need to refresh if the list shows tags
+        if (appState.currentRoute === '' || appState.currentRoute === '/') {
+            renderHome();
+        }
+
+    } catch (error) {
+        console.error('Error renaming tag:', error);
+        alert('更新標籤失敗: ' + error.message);
+    }
+}
+
+
 // --- 首頁 (文章列表) ---
-async function renderHome() {
+async function renderHome(tagName = null, userId = null) {
+    let title = '最新文章';
+    if (tagName) title = `標籤：${tagName}`;
+    if (userId) title = '歷史文章';
+
     appContainer.innerHTML = `
         <div class="mb-8 flex justify-between items-center">
-            <h1 class="text-3xl font-bold text-gray-900">最新文章</h1>
-            ${(appState.user && appState.userProfile?.canPost !== false) ? `<a href="#create" class="bg-black text-white px-4 py-2 rounded hover:bg-gray-800 transition">撰寫新文章</a>` : ''}
+            <h1 class="text-3xl font-bold text-gray-900">${title}</h1>
+            ${(appState.user && appState.userProfile?.canPost !== false) ? `<button onclick="openCreatePostModal()" class="bg-black text-white px-4 py-2 rounded hover:bg-gray-800 transition">撰寫新文章</button>` : ''}
         </div>
         <div class="bg-white shadow overflow-hidden sm:rounded-lg border border-gray-100">
             <div class="overflow-x-auto">
@@ -199,6 +433,7 @@ async function renderHome() {
                             <th class="text-left font-medium px-4 py-3 whitespace-nowrap">暱稱</th>
                             <th class="text-left font-medium px-4 py-3 whitespace-nowrap">標題圖片</th>
                             <th class="text-left font-medium px-4 py-3 whitespace-nowrap">日期時間</th>
+                            <th class="text-left font-medium px-4 py-3 whitespace-nowrap">標籤</th>
                             <th class="text-left font-medium px-4 py-3 whitespace-nowrap">標題</th>
                             <th class="text-left font-medium px-4 py-3 whitespace-nowrap">說明</th>
                             <th class="text-right font-medium px-4 py-3 whitespace-nowrap">點擊數</th>
@@ -209,7 +444,7 @@ async function renderHome() {
                     </thead>
                     <tbody id="posts-list" class="divide-y divide-gray-100">
                         <tr>
-                            <td class="px-4 py-8 text-center text-gray-500" colspan="10">
+                            <td class="px-4 py-8 text-center text-gray-500" colspan="11">
                                 <div class="flex items-center justify-center space-x-3">
                                     <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-900"></div>
                                     <span>載入文章中...</span>
@@ -226,19 +461,30 @@ async function renderHome() {
         const snapshot = await firebase.firestore().collection('posts').orderBy('createdAt', 'desc').get();
         const listContainer = document.getElementById('posts-list');
         
-        if (snapshot.empty) {
-            listContainer.innerHTML = `<tr><td class="px-4 py-10 text-center text-gray-500" colspan="10">目前沒有文章。</td></tr>`;
-            return;
-        }
-
         listContainer.innerHTML = '';
         const posts = [];
-        snapshot.forEach(doc => posts.push({ id: doc.id, ...doc.data() }));
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            let match = true;
+            if (tagName && data.tag !== tagName) match = false;
+            if (userId && data.authorId !== userId) match = false;
+            
+            if (match) {
+                posts.push({ id: doc.id, ...data });
+            }
+        });
+
+        if (posts.length === 0) {
+            listContainer.innerHTML = `<tr><td class="px-4 py-10 text-center text-gray-500" colspan="11">目前沒有文章。</td></tr>`;
+            return;
+        }
 
         for (let i = 0; i < posts.length; i++) {
             const post = posts[i];
             const dateTime = post.createdAt ? new Date(post.createdAt.seconds * 1000).toLocaleString() : '剛剛';
-            const summaryRaw = (post.content || '').toString();
+            const summaryRaw = post.contentFormat === 'html'
+                ? htmlToText((post.content || '').toString())
+                : (post.content || '').toString();
             const summary = summaryRaw.length > 60 ? summaryRaw.substring(0, 60) + '...' : summaryRaw;
             const viewCount = Number.isFinite(post.viewCount) ? post.viewCount : 0;
             const rating = Number.isFinite(post.ratingAvg) && post.ratingAvg > 0 ? post.ratingAvg.toFixed(1) : '-';
@@ -269,6 +515,11 @@ async function renderHome() {
                     </td>
                     <td class="px-4 py-3">${imgHtml}</td>
                     <td class="px-4 py-3 text-gray-700 whitespace-nowrap">${dateTime}</td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                            ${post.tag || '無'}
+                        </span>
+                    </td>
                     <td class="px-4 py-3">
                         <a href="#post/${post.id}" class="block hover:underline">
                             <div class="font-medium text-gray-900 truncate max-w-[220px]">${post.title || ''}</div>
@@ -284,7 +535,8 @@ async function renderHome() {
                         <div class="flex items-center space-x-3">
                             <a class="text-indigo-600 hover:text-indigo-500 font-medium" href="#post/${post.id}">開啟</a>
                             ${(appState.role === 'admin' || appState.role === 'moderator' || (appState.user && appState.user.uid === post.authorId)) ? 
-                                `<button onclick="deletePost('${post.id}')" class="text-red-600 hover:text-red-800 font-medium text-xs">刪除</button>` : ''}
+                                `<a href="#edit/${post.id}" class="text-blue-600 hover:text-blue-800 font-medium text-xs">編輯</a>
+                                 <button onclick="deletePost('${post.id}')" class="text-red-600 hover:text-red-800 font-medium text-xs">刪除</button>` : ''}
                         </div>
                     </td>
                 </tr>
@@ -293,7 +545,7 @@ async function renderHome() {
         loadPostCommentCounts(posts.map(p => p.id));
     } catch (error) {
         console.error("Error fetching posts:", error);
-        document.getElementById('posts-list').innerHTML = `<tr><td class="px-4 py-10 text-center text-red-500" colspan="10">載入失敗: ${error.message}</td></tr>`;
+        document.getElementById('posts-list').innerHTML = `<tr><td class="px-4 py-10 text-center text-red-500" colspan="11">載入失敗: ${error.message}</td></tr>`;
     }
 }
 
@@ -354,6 +606,18 @@ async function renderPost(postId) {
             </div>
             
             <div class="border-t border-gray-200 pt-8">
+                <!-- Rating Section -->
+                <div class="mb-8 bg-gray-50 p-6 rounded-lg border border-gray-100">
+                    <h3 class="text-lg font-medium text-gray-900 mb-2">文章評分</h3>
+                    <div class="flex items-center space-x-2">
+                        <div id="post-rating-stars" class="flex space-x-1 cursor-pointer">
+                            <!-- Stars injected by JS -->
+                        </div>
+                        <span id="post-rating-text" class="text-sm text-gray-500 ml-2"></span>
+                    </div>
+                    <p id="post-rating-msg" class="text-xs text-gray-400 mt-2"></p>
+                </div>
+
                 <h3 class="text-lg font-medium text-gray-900 mb-4">留言區</h3>
                 ${appState.user 
                     ? (appState.userProfile?.canComment !== false
@@ -385,8 +649,9 @@ async function renderPost(postId) {
         incrementPostViewCount(postId);
         const date = post.createdAt ? new Date(post.createdAt.seconds * 1000).toLocaleString() : '未知時間';
         
-        // Render Post
-        const contentHtml = post.content.replace(/\n/g, '<br>'); // Simple formatting
+        const contentHtml = post.contentFormat === 'html'
+            ? sanitizeHtml((post.content || '').toString())
+            : escapeHtml((post.content || '').toString()).replace(/\n/g, '<br>');
         
         // Action buttons for author/admin
         let actionButtons = '';
@@ -403,6 +668,10 @@ async function renderPost(postId) {
             <div class="mb-6">
                 <h1 class="text-3xl font-bold text-gray-900 mb-2">${post.title}</h1>
                 <div class="flex items-center text-sm text-gray-500">
+                    ${post.authorAvatarDataUrl 
+                        ? `<img src="${post.authorAvatarDataUrl}" class="h-8 w-8 rounded-full object-cover mr-2 border border-gray-200">`
+                        : `<div class="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 mr-2 border border-gray-200">${(post.authorName || post.authorEmail || 'U')[0].toUpperCase()}</div>`
+                    }
                     <span class="font-medium text-gray-900 mr-2">${post.authorName || post.authorEmail.split('@')[0]}</span>
                     <span>• ${date}</span>
                 </div>
@@ -415,6 +684,9 @@ async function renderPost(postId) {
 
         // Load Comments
         loadComments(postId);
+        
+        // Load Rating
+        loadRating(postId, post.authorId);
 
     } catch (error) {
         console.error(error);
@@ -450,6 +722,162 @@ async function loadComments(postId) {
             </div>
         `;
     });
+}
+
+// --- 評分系統 ---
+async function loadRating(postId, authorId) {
+    const starsContainer = document.getElementById('post-rating-stars');
+    const ratingText = document.getElementById('post-rating-text');
+    const ratingMsg = document.getElementById('post-rating-msg');
+    
+    if (!starsContainer) return;
+
+    let userRating = 0;
+    
+    // Check if user has rated
+    if (appState.user) {
+        try {
+            const ratingDoc = await firebase.firestore().collection('posts').doc(postId).collection('ratings').doc(appState.user.uid).get();
+            if (ratingDoc.exists) {
+                userRating = ratingDoc.data().rating;
+            }
+        } catch (e) {
+            console.error('Error fetching rating:', e);
+        }
+    }
+
+    renderStars(userRating, postId, authorId);
+    
+    // Update text
+    if (userRating > 0) {
+        ratingText.textContent = `您已評分: ${userRating} 星`;
+    } else {
+        ratingText.textContent = '尚未評分';
+    }
+    
+    if (appState.user && appState.user.uid === authorId) {
+        ratingMsg.textContent = '提示: 您無法評分自己的文章';
+    } else if (!appState.user) {
+        ratingMsg.textContent = '提示: 請先登入以評分';
+    }
+}
+
+function renderStars(currentRating, postId, authorId) {
+    const container = document.getElementById('post-rating-stars');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    for (let i = 1; i <= 5; i++) {
+        const star = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        star.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        star.setAttribute('viewBox', '0 0 24 24');
+        star.setAttribute('fill', i <= currentRating ? 'currentColor' : 'none');
+        star.setAttribute('stroke', 'currentColor');
+        star.setAttribute('stroke-width', '2');
+        star.setAttribute('class', `w-6 h-6 ${i <= currentRating ? 'text-yellow-400' : 'text-gray-300'} transition-colors duration-200`);
+        
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        path.setAttribute('d', 'M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.563.045.8.77.397 1.18l-4.25 4.353a.563.563 0 00-.152.481l1.325 5.424a.563.563 0 01-.82.818l-4.88-2.92a.563.563 0 00-.58 0l-4.88 2.92a.563.563 0 01-.82-.818l1.325-5.424a.563.563 0 00-.152-.481L.901 10.577c-.402-.41-.166-1.135.397-1.18l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z');
+        star.appendChild(path);
+
+        // Interaction logic
+        if (appState.user && appState.user.uid !== authorId) {
+            star.onclick = () => submitRating(postId, i, authorId);
+            star.onmouseenter = () => highlightStars(i);
+            container.onmouseleave = () => highlightStars(currentRating); // Reset on leave
+        }
+        
+        container.appendChild(star);
+    }
+}
+
+function highlightStars(count) {
+    const container = document.getElementById('post-rating-stars');
+    if (!container) return;
+    const stars = container.children;
+    for (let i = 0; i < stars.length; i++) {
+        if (i < count) {
+            stars[i].setAttribute('fill', 'currentColor');
+            stars[i].classList.remove('text-gray-300');
+            stars[i].classList.add('text-yellow-400');
+        } else {
+            stars[i].setAttribute('fill', 'none');
+            stars[i].classList.remove('text-yellow-400');
+            stars[i].classList.add('text-gray-300');
+        }
+    }
+}
+
+async function submitRating(postId, rating, authorId) {
+    if (!appState.user) {
+        alert('請先登入');
+        return;
+    }
+    
+    // Optimistic UI update
+    renderStars(rating, postId, authorId || ''); 
+    document.getElementById('post-rating-text').textContent = `您已評分: ${rating} 星`;
+    
+    try {
+        const db = firebase.firestore();
+        const postRef = db.collection('posts').doc(postId);
+        const ratingRef = postRef.collection('ratings').doc(appState.user.uid);
+        
+        await db.runTransaction(async (transaction) => {
+            const postDoc = await transaction.get(postRef);
+            const ratingDoc = await transaction.get(ratingRef);
+            
+            if (!postDoc.exists) throw "Post does not exist!";
+            
+            let newRatingCount = postDoc.data().ratingCount || 0;
+            let newRatingAvg = postDoc.data().ratingAvg || 0;
+            let oldRating = 0;
+            
+            if (ratingDoc.exists) {
+                oldRating = ratingDoc.data().rating;
+                // Update average: (avg * count - old + new) / count
+                // Note: count doesn't change
+                if (newRatingCount > 0) {
+                     let totalScore = (newRatingAvg * newRatingCount) - oldRating + rating;
+                     newRatingAvg = totalScore / newRatingCount;
+                } else {
+                     // Should not happen if doc exists but count is 0, fix it
+                     newRatingCount = 1;
+                     newRatingAvg = rating;
+                }
+            } else {
+                // New rating
+                // Update average: (avg * count + new) / (count + 1)
+                let totalScore = (newRatingAvg * newRatingCount) + rating;
+                newRatingCount += 1;
+                newRatingAvg = totalScore / newRatingCount;
+            }
+            
+            transaction.set(ratingRef, {
+                rating: rating,
+                userId: appState.user.uid,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            transaction.update(postRef, {
+                ratingAvg: newRatingAvg,
+                ratingCount: newRatingCount
+            });
+        });
+                  
+              } catch (error) {
+                  console.error("Rating failed: ", error);
+                  if (error.code === 'permission-denied') {
+                      alert('評分失敗: 權限不足。請確認 Firestore Rules 設定是否已更新 (允許非作者更新 ratingAvg/ratingCount)。');
+                  } else {
+                      alert('評分失敗: ' + (error.message || '請稍後再試'));
+                  }
+                  // Revert UI
+                  loadRating(postId, authorId);
+              }
 }
 
 // --- 登入/註冊 ---
@@ -531,91 +959,545 @@ function toggleAuthMode(mode) {
 }
 
 // --- 發布文章 ---
-function previewPostImage(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
+function compressImage(file, maxWidth, maxHeight, quality, callback) {
     const reader = new FileReader();
     reader.onload = function(e) {
         const img = new Image();
         img.onload = function() {
-            const canvas = document.createElement('canvas');
             let width = img.width;
             let height = img.height;
-            const MAX_WIDTH = 360;
-            const MAX_HEIGHT = 240;
 
             if (width > height) {
-                if (width > MAX_WIDTH) {
-                    height *= MAX_WIDTH / width;
-                    width = MAX_WIDTH;
+                if (width > maxWidth) {
+                    height *= maxWidth / width;
+                    width = maxWidth;
                 }
             } else {
-                if (height > MAX_HEIGHT) {
-                    width *= MAX_HEIGHT / height;
-                    height = MAX_HEIGHT;
+                if (height > maxHeight) {
+                    width *= maxHeight / height;
+                    height = maxHeight;
                 }
             }
+            const canvas = document.createElement('canvas');
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, width, height);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-            
-            const preview = document.getElementById('image-preview');
-            preview.src = dataUrl;
-            preview.classList.remove('hidden');
-            document.getElementById('post-image-data').value = dataUrl;
-            document.getElementById('preview-placeholder').classList.add('hidden');
+            const dataUrl = canvas.toDataURL('image/jpeg', quality);
+            callback(dataUrl);
         };
         img.src = e.target.result;
     };
     reader.readAsDataURL(file);
 }
 
-function renderCreatePost() {
-    if (appState.userProfile?.canPost === false) {
-        alert('您已被禁止發文');
-        window.location.hash = '/';
-        return;
+function previewPostImage(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    compressImage(file, 360, 240, 0.8, (dataUrl) => {
+        const preview = document.getElementById('image-preview');
+        preview.src = dataUrl;
+        preview.classList.remove('hidden');
+        document.getElementById('post-image-data').value = dataUrl;
+        document.getElementById('preview-placeholder').classList.add('hidden');
+    });
+}
+
+let richUrlAction = null;
+
+function escapeHtml(str) {
+    return (str || '').toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function htmlToText(html) {
+    const div = document.createElement('div');
+    div.innerHTML = (html || '').toString();
+    return (div.textContent || '').trim();
+}
+
+function isSafeLinkHref(href) {
+    try {
+        const u = new URL(href, window.location.origin);
+        return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:';
+    } catch {
+        return false;
     }
-    appContainer.innerHTML = `
-        <div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow border border-gray-100">
-            <h1 class="text-2xl font-bold mb-6 text-gray-900">發布新文章</h1>
-            <form onsubmit="submitPost(event)">
-                <div class="mb-6">
-                    <label class="block text-gray-700 text-sm font-bold mb-2">標題圖片 (建議 360x240)</label>
-                    <div class="flex flex-col sm:flex-row gap-4 items-start">
-                        <div class="w-[360px] h-[240px] bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center overflow-hidden relative shrink-0">
-                            <span id="preview-placeholder" class="text-gray-400 text-sm pointer-events-none">圖片預覽</span>
-                            <img id="image-preview" class="absolute inset-0 w-full h-full object-contain hidden bg-white">
-                        </div>
-                        <div class="flex-1 space-y-2">
-                            <input type="file" accept="image/*" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-black file:text-white hover:file:bg-gray-800 cursor-pointer" onchange="previewPostImage(event)">
-                            <p class="text-xs text-gray-500">支援 JPG, PNG 格式。圖片將自動調整為適合大小。</p>
-                            <input type="hidden" id="post-image-data">
-                        </div>
-                    </div>
+}
+
+function isSafeImageSrc(src) {
+    if (!src) return false;
+    if (src.startsWith('data:image/')) return true;
+    try {
+        const u = new URL(src, window.location.origin);
+        return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
+function extractYouTubeId(url) {
+    try {
+        const u = new URL(url);
+        if (u.hostname === 'youtu.be') return (u.pathname || '').replace('/', '') || null;
+        if (u.hostname.endsWith('youtube.com') || u.hostname.endsWith('youtube-nocookie.com')) {
+            const v = u.searchParams.get('v');
+            if (v) return v;
+            const parts = (u.pathname || '').split('/').filter(Boolean);
+            const idx = parts.indexOf('embed');
+            if (idx !== -1 && parts[idx + 1]) return parts[idx + 1];
+            const sIdx = parts.indexOf('shorts');
+            if (sIdx !== -1 && parts[sIdx + 1]) return parts[sIdx + 1];
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+function isSafeYouTubeEmbedSrc(src) {
+    try {
+        const u = new URL(src, window.location.origin);
+        if (u.protocol !== 'https:') return false;
+        const hostOk = u.hostname === 'www.youtube.com' || u.hostname === 'www.youtube-nocookie.com';
+        if (!hostOk) return false;
+        if (!u.pathname.startsWith('/embed/')) return false;
+        const id = u.pathname.replace('/embed/', '').split('/')[0];
+        return Boolean(id);
+    } catch {
+        return false;
+    }
+}
+
+function sanitizeHtml(inputHtml) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${(inputHtml || '').toString()}</div>`, 'text/html');
+    const root = doc.body.firstChild;
+    const outDoc = document.implementation.createHTMLDocument('');
+    const outRoot = outDoc.createElement('div');
+
+    const allowedTags = new Set([
+        'p', 'br', 'div', 'span',
+        'b', 'strong', 'i', 'em', 'u', 's', 'strike',
+        'ul', 'ol', 'li',
+        'h1', 'h2', 'h3', 'h4',
+        'blockquote',
+        'a', 'img', 'iframe'
+    ]);
+
+    const allowedAttrsByTag = {
+        a: new Set(['href', 'target', 'rel', 'title', 'class']),
+        img: new Set(['src', 'alt', 'title', 'width', 'height', 'class']),
+        iframe: new Set(['src', 'width', 'height', 'allow', 'allowfullscreen', 'frameborder', 'class', 'title']),
+        '*': new Set(['class'])
+    };
+
+    function appendSanitizedChildren(inNode, outParent) {
+        for (const child of Array.from(inNode.childNodes || [])) {
+            if (child.nodeType === Node.TEXT_NODE) {
+                outParent.appendChild(outDoc.createTextNode(child.nodeValue || ''));
+                continue;
+            }
+            if (child.nodeType !== Node.ELEMENT_NODE) continue;
+
+            const tag = (child.tagName || '').toLowerCase();
+            if (!allowedTags.has(tag)) {
+                appendSanitizedChildren(child, outParent);
+                continue;
+            }
+
+            if (tag === 'iframe') {
+                const src = child.getAttribute('src') || '';
+                if (!isSafeYouTubeEmbedSrc(src)) {
+                    const text = child.textContent || '';
+                    if (text.trim()) outParent.appendChild(outDoc.createTextNode(text));
+                    continue;
+                }
+            }
+
+            if (tag === 'img') {
+                const src = child.getAttribute('src') || '';
+                if (!isSafeImageSrc(src)) continue;
+            }
+
+            if (tag === 'a') {
+                const href = child.getAttribute('href') || '';
+                if (!isSafeLinkHref(href)) {
+                    appendSanitizedChildren(child, outParent);
+                    continue;
+                }
+            }
+
+            const outEl = outDoc.createElement(tag);
+            const allowed = new Set([...(allowedAttrsByTag['*'] || []), ...(allowedAttrsByTag[tag] || [])]);
+            for (const attr of Array.from(child.attributes || [])) {
+                const name = (attr.name || '').toLowerCase();
+                if (name.startsWith('on')) continue;
+                if (name === 'style') continue;
+                if (!allowed.has(name)) continue;
+                let value = attr.value || '';
+                if (tag === 'a' && name === 'href' && !isSafeLinkHref(value)) continue;
+                if (tag === 'img' && name === 'src' && !isSafeImageSrc(value)) continue;
+                if (tag === 'iframe' && name === 'src' && !isSafeYouTubeEmbedSrc(value)) continue;
+                outEl.setAttribute(name, value);
+            }
+
+            if (tag === 'a') {
+                outEl.setAttribute('target', '_blank');
+                outEl.setAttribute('rel', 'noopener noreferrer');
+            }
+
+            appendSanitizedChildren(child, outEl);
+            outParent.appendChild(outEl);
+        }
+    }
+
+    appendSanitizedChildren(root, outRoot);
+    return outRoot.innerHTML;
+}
+
+function plainTextToHtml(text) {
+    return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
+function getRichEditorHtml() {
+    const el = document.getElementById('rich-editor-content');
+    if (!el) return '';
+    return sanitizeHtml(el.innerHTML);
+}
+
+function initRichEditor(initialHtml) {
+    const el = document.getElementById('rich-editor-content');
+    if (!el) return;
+    el.innerHTML = sanitizeHtml(initialHtml || '') || '<p><br></p>';
+    el.focus();
+}
+
+function richHandlePaste(e) {
+    try {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData)?.getData('text/plain') || '';
+        document.execCommand('insertText', false, text);
+    } catch {
+    }
+}
+
+function richCmd(cmd, value) {
+    const el = document.getElementById('rich-editor-content');
+    if (!el) return;
+    el.focus();
+    if (typeof value === 'undefined') document.execCommand(cmd, false, null);
+    else document.execCommand(cmd, false, value);
+}
+
+function richInsertImageFromFile(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+    
+    // Compress image to avoid Firestore 1MB limit
+    compressImage(file, 800, 800, 0.7, (dataUrl) => {
+        richCmd('insertImage', dataUrl);
+        event.target.value = '';
+    });
+}
+
+function ensureRichUrlModal() {
+    if (document.getElementById('rich-url-modal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'rich-url-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-white w-full max-w-sm rounded-lg shadow-lg p-6">
+            <h3 class="text-lg font-medium text-gray-900 mb-4" id="rich-url-title">插入</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-700 mb-1">網址</label>
+                    <input id="rich-url-input" type="text" class="w-full border rounded px-3 py-2 focus:ring-black focus:border-black" placeholder="https://..." onkeydown="if(event.key === 'Enter') submitRichUrl()">
                 </div>
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2" for="title">標題</label>
-                    <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-black" id="title" type="text" placeholder="輸入文章標題" required>
+                <div class="flex justify-end space-x-2">
+                    <button onclick="closeRichUrlModal()" class="px-4 py-2 rounded border border-gray-300 hover:bg-gray-100">取消</button>
+                    <button onclick="submitRichUrl()" class="px-4 py-2 rounded bg-black text-white hover:bg-gray-800">插入</button>
                 </div>
-                <div class="mb-6">
-                    <label class="block text-gray-700 text-sm font-bold mb-2" for="content">內容</label>
-                    <textarea class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-black h-48" id="content" placeholder="輸入文章內容..." required></textarea>
-                </div>
-                <div class="flex items-center justify-between">
-                    <button class="bg-black hover:bg-gray-800 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="button" onclick="window.history.back()">
-                        取消
-                    </button>
-                    <button class="bg-black hover:bg-gray-800 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
-                        發布
-                    </button>
-                </div>
-            </form>
+            </div>
         </div>
     `;
+    document.body.appendChild(modal);
+}
+
+function openRichUrlModal(action) {
+    richUrlAction = action;
+    ensureRichUrlModal();
+    const modal = document.getElementById('rich-url-modal');
+    const title = document.getElementById('rich-url-title');
+    const input = document.getElementById('rich-url-input');
+    title.textContent = action === 'video' ? '插入影片' : '插入連結';
+    input.value = '';
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    setTimeout(() => input.focus(), 50);
+}
+
+function closeRichUrlModal() {
+    const modal = document.getElementById('rich-url-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    richUrlAction = null;
+}
+
+function submitRichUrl() {
+    const input = document.getElementById('rich-url-input');
+    const url = (input?.value || '').trim();
+    if (!url) return;
+
+    if (richUrlAction === 'link') {
+        if (!isSafeLinkHref(url)) {
+            alert('連結格式不正確');
+            return;
+        }
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) {
+            richCmd('createLink', url);
+        } else {
+            richCmd('insertHTML', `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`);
+        }
+        closeRichUrlModal();
+        return;
+    }
+
+    if (richUrlAction === 'video') {
+        const id = extractYouTubeId(url);
+        if (!id) {
+            alert('目前僅支援 YouTube 連結');
+            return;
+        }
+        const src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}`;
+        const html = `<div class="w-full"><iframe src="${src}" width="100%" height="360" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div><p><br></p>`;
+        richCmd('insertHTML', html);
+        closeRichUrlModal();
+        return;
+    }
+}
+
+function openCreatePostModal() {
+    if (appState.userProfile?.canPost === false) {
+        alert('您已被禁止發文');
+        return;
+    }
+    
+    let modal = document.getElementById('create-post-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'create-post-modal';
+        modal.className = 'fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50';
+        document.body.appendChild(modal);
+    }
+
+    const tagOptions = appState.openTabs.map(t => `<option value="${t.name}">${t.name}</option>`).join('');
+
+    modal.innerHTML = `
+        <div class="bg-white w-[80%] h-[80%] rounded-lg shadow-lg p-8 overflow-y-auto relative">
+            <button onclick="closeCreatePostModal()" class="absolute top-4 right-4 text-gray-500 hover:text-black">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+            <div class="max-w-4xl mx-auto">
+                <div class="flex items-baseline space-x-6 mb-6">
+                    <h1 class="text-2xl font-bold text-gray-900">發布新文章</h1>
+                </div>
+                <form onsubmit="submitPost(event)">
+                    <div class="mb-4">
+                        <label class="block text-gray-700 text-sm font-bold mb-2" for="post-tag">主題標籤</label>
+                        <select class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-black bg-white" id="post-tag" required>
+                            <option value="" disabled selected>請選擇主題標籤</option>
+                            ${tagOptions}
+                        </select>
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">標題圖片 (建議 360x240)</label>
+                        <div class="flex flex-col sm:flex-row gap-4 items-start">
+                            <div class="w-[360px] h-[240px] bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center overflow-hidden relative shrink-0">
+                                <span id="preview-placeholder" class="text-gray-400 text-sm pointer-events-none">圖片預覽</span>
+                                <img id="image-preview" class="absolute inset-0 w-full h-full object-contain hidden bg-white">
+                            </div>
+                            <div class="flex-1 space-y-2">
+                                <input type="file" accept="image/*" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-black file:text-white hover:file:bg-gray-800 cursor-pointer" onchange="previewPostImage(event)">
+                                <p class="text-xs text-gray-500">支援 JPG, PNG 格式。圖片將自動調整為適合大小。</p>
+                                <input type="hidden" id="post-image-data">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-gray-700 text-sm font-bold mb-2" for="title">標題</label>
+                        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-black" id="title" type="text" placeholder="輸入文章標題" required>
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">內容</label>
+                        <div class="border rounded shadow-sm">
+                            <div class="flex flex-wrap gap-2 p-2 border-b bg-gray-50">
+                                <button type="button" onclick="richCmd('undo')" class="px-2 py-1 text-xs border rounded hover:bg-white">復原</button>
+                                <button type="button" onclick="richCmd('redo')" class="px-2 py-1 text-xs border rounded hover:bg-white">重做</button>
+                                <span class="mx-1"></span>
+                                <button type="button" onclick="richCmd('bold')" class="px-2 py-1 text-xs border rounded hover:bg-white font-bold">B</button>
+                                <button type="button" onclick="richCmd('italic')" class="px-2 py-1 text-xs border rounded hover:bg-white italic">I</button>
+                                <button type="button" onclick="richCmd('underline')" class="px-2 py-1 text-xs border rounded hover:bg-white underline">U</button>
+                                <button type="button" onclick="richCmd('strikeThrough')" class="px-2 py-1 text-xs border rounded hover:bg-white line-through">S</button>
+                                <button type="button" onclick="richCmd('removeFormat')" class="px-2 py-1 text-xs border rounded hover:bg-white">清除</button>
+                                <span class="mx-1"></span>
+                                <button type="button" onclick="richCmd('justifyLeft')" class="px-2 py-1 text-xs border rounded hover:bg-white">靠左</button>
+                                <button type="button" onclick="richCmd('justifyCenter')" class="px-2 py-1 text-xs border rounded hover:bg-white">置中</button>
+                                <button type="button" onclick="richCmd('justifyRight')" class="px-2 py-1 text-xs border rounded hover:bg-white">靠右</button>
+                                <span class="mx-1"></span>
+                                <button type="button" onclick="richCmd('insertUnorderedList')" class="px-2 py-1 text-xs border rounded hover:bg-white">項目</button>
+                                <button type="button" onclick="richCmd('insertOrderedList')" class="px-2 py-1 text-xs border rounded hover:bg-white">編號</button>
+                                <span class="mx-1"></span>
+                                <button type="button" onclick="openRichUrlModal('link')" class="px-2 py-1 text-xs border rounded hover:bg-white">連結</button>
+                                <button type="button" onclick="document.getElementById('rich-image-input').click()" class="px-2 py-1 text-xs border rounded hover:bg-white">圖片</button>
+                                <button type="button" onclick="openRichUrlModal('video')" class="px-2 py-1 text-xs border rounded hover:bg-white">影片</button>
+                            </div>
+                            <div id="rich-editor-content" class="p-3 min-h-[240px] outline-none" contenteditable="true" onpaste="richHandlePaste(event)"></div>
+                        </div>
+                        <input id="rich-image-input" type="file" accept="image/*" class="hidden" onchange="richInsertImageFromFile(event)">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <button class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="button" onclick="closeCreatePostModal()">
+                            取消
+                        </button>
+                        <button class="bg-black hover:bg-gray-800 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+                            發布
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    initRichEditor('');
+}
+
+function closeCreatePostModal() {
+    const modal = document.getElementById('create-post-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+}
+
+function renderCreatePost() {
+    window.location.hash = '/';
+    setTimeout(openCreatePostModal, 100);
+}
+
+async function renderEditPost(postId) {
+    if (!appState.user) {
+        window.location.hash = '#login';
+        return;
+    }
+
+    try {
+        const doc = await firebase.firestore().collection('posts').doc(postId).get();
+        if (!doc.exists) {
+            alert('文章不存在');
+            window.location.hash = '/';
+            return;
+        }
+        const data = doc.data();
+
+        if (data.authorId !== appState.user.uid && appState.role !== 'admin' && appState.role !== 'moderator') {
+            alert('您沒有權限編輯此文章');
+            window.location.hash = '/';
+            return;
+        }
+
+        const tagOptions = appState.openTabs.map(t => 
+            `<option value="${t.name}" ${t.name === data.tag ? 'selected' : ''}>${t.name}</option>`
+        ).join('');
+
+        appContainer.innerHTML = `
+            <div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow border border-gray-100">
+                <div class="flex items-baseline space-x-6 mb-6">
+                    <h1 class="text-2xl font-bold text-gray-900">編輯文章</h1>
+                </div>
+                <form onsubmit="updatePost(event, '${postId}')">
+                    <div class="mb-4">
+                        <label class="block text-gray-700 text-sm font-bold mb-2" for="post-tag">主題標籤</label>
+                        <select class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-black bg-white" id="post-tag" required>
+                            <option value="" disabled>請選擇主題標籤</option>
+                            ${tagOptions}
+                        </select>
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">標題圖片 (建議 360x240)</label>
+                        <div class="flex flex-col sm:flex-row gap-4 items-start">
+                            <div class="w-[360px] h-[240px] bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center overflow-hidden relative shrink-0">
+                                <span id="preview-placeholder" class="${data.imageDataUrl ? 'hidden' : ''} text-gray-400 text-sm pointer-events-none">圖片預覽</span>
+                                <img id="image-preview" src="${data.imageDataUrl || ''}" class="${data.imageDataUrl ? '' : 'hidden'} absolute inset-0 w-full h-full object-contain bg-white">
+                            </div>
+                            <div class="flex-1 space-y-2">
+                                <input type="file" accept="image/*" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-black file:text-white hover:file:bg-gray-800 cursor-pointer" onchange="previewPostImage(event)">
+                                <p class="text-xs text-gray-500">支援 JPG, PNG 格式。圖片將自動調整為適合大小。</p>
+                                <input type="hidden" id="post-image-data" value="${data.imageDataUrl || ''}">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-gray-700 text-sm font-bold mb-2" for="title">標題</label>
+                        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-black" id="title" type="text" placeholder="輸入文章標題" value="${data.title}" required>
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">內容</label>
+                        <div class="border rounded shadow-sm">
+                            <div class="flex flex-wrap gap-2 p-2 border-b bg-gray-50">
+                                <button type="button" onclick="richCmd('undo')" class="px-2 py-1 text-xs border rounded hover:bg-white">復原</button>
+                                <button type="button" onclick="richCmd('redo')" class="px-2 py-1 text-xs border rounded hover:bg-white">重做</button>
+                                <span class="mx-1"></span>
+                                <button type="button" onclick="richCmd('bold')" class="px-2 py-1 text-xs border rounded hover:bg-white font-bold">B</button>
+                                <button type="button" onclick="richCmd('italic')" class="px-2 py-1 text-xs border rounded hover:bg-white italic">I</button>
+                                <button type="button" onclick="richCmd('underline')" class="px-2 py-1 text-xs border rounded hover:bg-white underline">U</button>
+                                <button type="button" onclick="richCmd('strikeThrough')" class="px-2 py-1 text-xs border rounded hover:bg-white line-through">S</button>
+                                <button type="button" onclick="richCmd('removeFormat')" class="px-2 py-1 text-xs border rounded hover:bg-white">清除</button>
+                                <span class="mx-1"></span>
+                                <button type="button" onclick="richCmd('justifyLeft')" class="px-2 py-1 text-xs border rounded hover:bg-white">靠左</button>
+                                <button type="button" onclick="richCmd('justifyCenter')" class="px-2 py-1 text-xs border rounded hover:bg-white">置中</button>
+                                <button type="button" onclick="richCmd('justifyRight')" class="px-2 py-1 text-xs border rounded hover:bg-white">靠右</button>
+                                <span class="mx-1"></span>
+                                <button type="button" onclick="richCmd('insertUnorderedList')" class="px-2 py-1 text-xs border rounded hover:bg-white">項目</button>
+                                <button type="button" onclick="richCmd('insertOrderedList')" class="px-2 py-1 text-xs border rounded hover:bg-white">編號</button>
+                                <span class="mx-1"></span>
+                                <button type="button" onclick="openRichUrlModal('link')" class="px-2 py-1 text-xs border rounded hover:bg-white">連結</button>
+                                <button type="button" onclick="document.getElementById('rich-image-input').click()" class="px-2 py-1 text-xs border rounded hover:bg-white">圖片</button>
+                                <button type="button" onclick="openRichUrlModal('video')" class="px-2 py-1 text-xs border rounded hover:bg-white">影片</button>
+                            </div>
+                            <div id="rich-editor-content" class="p-3 min-h-[240px] outline-none" contenteditable="true" onpaste="richHandlePaste(event)"></div>
+                        </div>
+                        <input id="rich-image-input" type="file" accept="image/*" class="hidden" onchange="richInsertImageFromFile(event)">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <button class="bg-black hover:bg-gray-800 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="button" onclick="window.history.back()">
+                            取消
+                        </button>
+                        <button class="bg-black hover:bg-gray-800 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+                            儲存修改
+                        </button>
+                    </div>
+                </form>
+            </div>
+        `;
+        const initialHtml = data.contentFormat === 'html'
+            ? (data.content || '')
+            : plainTextToHtml((data.content || '').toString());
+        initRichEditor(initialHtml);
+    } catch (error) {
+        console.error(error);
+        alert('載入失敗: ' + error.message);
+        window.location.hash = '/';
+    }
 }
 
 // --- 管理後台 ---
@@ -826,13 +1708,29 @@ async function logout() {
 async function submitPost(e) {
     e.preventDefault();
     const title = document.getElementById('title').value;
-    const content = document.getElementById('content').value;
+    const content = getRichEditorHtml();
+    const tag = document.getElementById('post-tag').value.trim();
     const imageDataUrl = document.getElementById('post-image-data').value || null;
+    const contentText = htmlToText(content);
+
+    if (!contentText && !content.includes('<img') && !content.includes('<iframe')) {
+        alert('請輸入文章內容或插入圖片/影片');
+        return;
+    }
+
+    // Check size limit (Firestore 1MB limit)
+    const estimatedSize = new Blob([content]).size + (imageDataUrl ? new Blob([imageDataUrl]).size : 0) + 5000;
+    if (estimatedSize > 1040000) {
+        alert('發布失敗：文章內容過大（圖片過多）。\n預估大小: ' + (estimatedSize/1024/1024).toFixed(2) + ' MB (上限 1MB)\n請減少圖片數量。');
+        return;
+    }
 
     try {
         await firebase.firestore().collection('posts').add({
             title,
             content,
+            contentFormat: 'html',
+            tag,
             imageDataUrl,
             authorId: appState.user.uid,
             authorEmail: appState.user.email,
@@ -844,9 +1742,46 @@ async function submitPost(e) {
             ratingAvg: 0,
             ratingCount: 0
         });
+        closeCreatePostModal();
         window.location.hash = '/';
     } catch (error) {
         alert('發布失敗: ' + error.message);
+    }
+}
+
+async function updatePost(e, postId) {
+    e.preventDefault();
+    const title = document.getElementById('title').value;
+    const content = getRichEditorHtml();
+    const tag = document.getElementById('post-tag').value;
+    const imageDataUrl = document.getElementById('post-image-data').value || null;
+    const contentText = htmlToText(content);
+
+    if (!contentText && !content.includes('<img') && !content.includes('<iframe')) {
+        alert('請輸入文章內容或插入圖片/影片');
+        return;
+    }
+
+    // Check size limit
+    const estimatedSize = new Blob([content]).size + (imageDataUrl ? new Blob([imageDataUrl]).size : 0) + 5000;
+    if (estimatedSize > 1040000) {
+        alert('更新失敗：文章內容過大（圖片過多）。\n預估大小: ' + (estimatedSize/1024/1024).toFixed(2) + ' MB (上限 1MB)\n請減少圖片數量。');
+        return;
+    }
+
+    try {
+        await firebase.firestore().collection('posts').doc(postId).update({
+            title,
+            content,
+            contentFormat: 'html',
+            tag,
+            imageDataUrl,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        alert('更新成功！');
+        window.location.hash = '#post/' + postId;
+    } catch (error) {
+        alert('更新失敗: ' + error.message);
     }
 }
 
