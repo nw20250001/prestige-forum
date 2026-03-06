@@ -53,6 +53,8 @@ function init() {
                     const profile = {
                         email: user.email,
                         role,
+                        canPost: true,
+                        canComment: true,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
                     if (user.displayName) profile.nickname = user.displayName;
@@ -674,6 +676,11 @@ async function renderPost(postId) {
         const contentHtml = post.contentFormat === 'html'
             ? sanitizeHtml((post.content || '').toString())
             : escapeHtml((post.content || '').toString()).replace(/\n/g, '<br>');
+        const shareUrl = window.location.origin + '/#post/' + postId;
+        const safeTitle = (post.title || '').replace(/["']/g, '');
+        const encUrl = encodeURIComponent(shareUrl);
+        const encTitle = encodeURIComponent(post.title || '');
+        const encText = encodeURIComponent((post.title || '') + ' ' + shareUrl);
         
         // Action buttons for author/admin
         let actionButtons = '';
@@ -697,13 +704,26 @@ async function renderPost(postId) {
         document.getElementById('post-content').innerHTML = `
             <div class="mb-6">
                 <h1 class="text-3xl font-bold text-gray-900 mb-2">${post.title}</h1>
-                <div class="flex items-center text-sm text-gray-500">
-                    ${authorAvatarUrl 
-                        ? `<img src="${authorAvatarUrl}" class="h-8 w-8 rounded-full object-cover mr-2">`
-                        : `<div class="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 mr-2">${(post.authorName || post.authorEmail || 'U')[0].toUpperCase()}</div>`
-                    }
-                    <span class="font-medium text-gray-900 mr-2">${post.authorName || post.authorEmail.split('@')[0]}</span>
-                    <span>• ${date}</span>
+                <div class="flex items-center justify-between text-sm text-gray-500">
+                    <div class="flex items-center">
+                        ${authorAvatarUrl 
+                            ? `<img src="${authorAvatarUrl}" class="h-8 w-8 rounded-full object-cover mr-2">`
+                            : `<div class="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 mr-2">${(post.authorName || post.authorEmail || 'U')[0].toUpperCase()}</div>`
+                        }
+                        <span class="font-medium text-gray-900 mr-2">${post.authorName || post.authorEmail.split('@')[0]}</span>
+                        <span>• ${date}</span>
+                    </div>
+                    <div class="relative">
+                        <button onclick="shareNative('${postId}','${safeTitle}')" class="px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50">分享</button>
+                        <div id="share-menu-${postId}" class="hidden absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-md shadow-lg p-2 z-10">
+                            <a class="block px-3 py-2 hover:bg-gray-50 rounded" target="_blank" rel="noopener" href="https://social-plugins.line.me/lineit/share?url=${encUrl}">LINE</a>
+                            <a class="block px-3 py-2 hover:bg-gray-50 rounded" target="_blank" rel="noopener" href="https://www.facebook.com/sharer/sharer.php?u=${encUrl}">Facebook</a>
+                            <a class="block px-3 py-2 hover:bg-gray-50 rounded" target="_blank" rel="noopener" href="https://www.threads.net/intent/post?text=${encText}">Threads</a>
+                            <a class="block px-3 py-2 hover:bg-gray-50 rounded" target="_blank" rel="noopener" href="https://twitter.com/intent/tweet?url=${encUrl}&text=${encTitle}">Twitter</a>
+                            <a class="block px-3 py-2 hover:bg-gray-50 rounded" target="_blank" rel="noopener" href="https://mail.google.com/mail/?view=cm&fs=1&su=${encTitle}&body=${encUrl}">Gmail</a>
+                            <button class="w-full text-left px-3 py-2 hover:bg-gray-50 rounded" onclick="copyShareLink('${shareUrl}')">複製連結</button>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="prose max-w-none text-gray-800 leading-relaxed">
@@ -1868,6 +1888,33 @@ async function ensureUserCanPost() {
     }
 }
 
+async function ensureUserCanComment() {
+    if (!appState.user) throw new Error('請先登入');
+    const db = firebase.firestore();
+    const ref = db.collection('users').doc(appState.user.uid);
+    const snap = await ref.get();
+    if (!snap.exists) {
+        await ref.set({
+            email: appState.user.email,
+            role: 'user',
+            canPost: true,
+            canComment: true,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        appState.role = 'user';
+        appState.userProfile = { email: appState.user.email, role: 'user', canPost: true, canComment: true };
+        return;
+    }
+    const data = snap.data() || {};
+    if (data.canComment === false) {
+        throw new Error('您的帳號目前無法留言');
+    }
+    if (typeof data.canComment === 'undefined') {
+        await ref.set({ canComment: true }, { merge: true });
+        appState.userProfile = { ...(appState.userProfile || {}), canComment: true };
+    }
+}
+
 async function submitPost(e) {
     e.preventDefault();
     const title = document.getElementById('title').value;
@@ -1963,6 +2010,7 @@ async function submitComment(postId) {
     if (!content) return;
 
     try {
+        await ensureUserCanComment();
         await firebase.firestore().collection('posts').doc(postId).collection('comments').add({
             content,
             authorId: appState.user.uid,
@@ -1978,7 +2026,11 @@ async function submitComment(postId) {
         input.value = '';
         loadComments(postId); // Refresh comments
     } catch (error) {
-        alert('留言失敗: ' + error.message);
+        if (error.code === 'permission-denied') {
+            alert('留言失敗: 權限不足，請確認帳號具備留言權限，且 Firestore 規則已更新。');
+        } else {
+            alert('留言失敗: ' + (error.message || '請稍後再試'));
+        }
     }
 }
 
@@ -2064,6 +2116,39 @@ async function deletePost(postId) {
     } catch (error) {
         console.error('Delete error:', error);
         alert('刪除失敗: ' + error.message);
+    }
+}
+
+function getPostShareUrl(postId) {
+    return window.location.origin + '/#post/' + postId;
+}
+
+function toggleShareMenu(postId) {
+    const el = document.getElementById('share-menu-' + postId);
+    if (!el) return;
+    el.classList.toggle('hidden');
+}
+
+function copyShareLink(url) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+            alert('連結已複製');
+        }).catch(() => {
+            alert('請手動複製：' + url);
+        });
+    } else {
+        alert('請手動複製：' + url);
+    }
+}
+
+function shareNative(postId, title) {
+    const url = getPostShareUrl(postId);
+    if (navigator.share) {
+        navigator.share({ title, url }).catch(() => {
+            toggleShareMenu(postId);
+        });
+    } else {
+        toggleShareMenu(postId);
     }
 }
 
