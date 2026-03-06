@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prestige Forum | 專業論壇中心</title>
+    <link rel="icon" href="images/logo.svg" type="image/svg+xml">
     <!-- Tailwind CSS for Professional Styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Custom Config for Tailwind -->
@@ -32,9 +33,10 @@
 
     <!-- Navigation -->
     <nav class="border-b border-border-gray bg-white sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="mx-auto w-[94%]">
             <div class="flex justify-between h-16 items-center">
                 <div class="flex-shrink-0 flex items-center cursor-pointer" onclick="window.location.hash=''">
+                    <img src="images/logo.svg" alt="Prestige Forum Logo" class="h-8 w-8 mr-2">
                     <span class="text-2xl font-bold tracking-tight">PRESTIGE<span class="text-secondary-gray font-light">FORUM</span></span>
                 </div>
                 <div class="hidden sm:ml-6 sm:flex sm:space-x-8" id="nav-links">
@@ -48,7 +50,7 @@
     </nav>
 
     <!-- Main Content Area -->
-    <main id="app" class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+    <main id="app" class="flex-grow mx-auto py-8 w-[94%]">
         <!-- Content injected by Router -->
         <div class="animate-pulse space-y-4">
             <div class="h-4 bg-gray-200 rounded w-3/4"></div>
@@ -59,7 +61,7 @@
 
     <!-- Footer -->
     <footer class="bg-primary-black text-white py-8 mt-auto">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+        <div class="mx-auto w-[94%] flex justify-between items-center">
             <p class="text-sm text-gray-400">&copy; 2026 Prestige Forum. All rights reserved.</p>
             <div class="text-sm text-gray-500 space-x-4">
                 <a href="#" class="hover:text-white transition">隱私權政策</a>
@@ -72,7 +74,15 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-analytics-compat.js"></script>
+    <script>
+        (function() {
+            const h = window.location.hostname;
+            const isLocalhost = h === 'localhost' || h === '127.0.0.1' || h === '::1';
+            if (!isLocalhost) {
+                document.write('<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-analytics-compat.js"><\\/script>');
+            }
+        })();
+    </script>
 
     <!-- Application Logic -->
     <script>

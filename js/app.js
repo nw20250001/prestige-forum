@@ -10,6 +10,7 @@ const appState = {
     currentRoute: '',
     params: {},
     openTabs: JSON.parse(localStorage.getItem('openTabs')) || [], // { name: 'tagName', route: '#tag/tagName' }
+    initialRouteProcessed: false,
 };
 
 // Ensure "技術論壇" is restored if missing
@@ -88,12 +89,18 @@ function handleRoute() {
     
     appState.currentRoute = route;
     appState.params = args;
+    const isFirst = !appState.initialRouteProcessed;
+    appState.initialRouteProcessed = true;
+    if (isFirst && (route === 'login' || route === 'register')) {
+        window.location.hash = '/';
+        return;
+    }
 
     renderNav(); // Update navigation active state
 
     // 清空容器
     appContainer.innerHTML = '';
-    appContainer.className = "flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full fade-in";
+    appContainer.className = "flex-grow mx-auto py-8 w-[94%] fade-in";
 
     switch (route) {
         case '':
@@ -112,8 +119,13 @@ function handleRoute() {
             break;
         case 'my-posts':
             if (!appState.user) {
-                window.location.hash = '#login';
-                return;
+                if (isFirst) {
+                    window.location.hash = '/';
+                    return;
+                } else {
+                    window.location.hash = '#login';
+                    return;
+                }
             }
             renderHome(null, appState.user.uid);
             break;
@@ -125,8 +137,13 @@ function handleRoute() {
             break;
         case 'create':
             if (!appState.user) {
-                window.location.hash = '#login';
-                return;
+                if (isFirst) {
+                    window.location.hash = '/';
+                    return;
+                } else {
+                    window.location.hash = '#login';
+                    return;
+                }
             }
             renderCreatePost();
             break;
@@ -416,18 +433,18 @@ async function submitEditTag() {
 // --- 首頁 (文章列表) ---
 async function renderHome(tagName = null, userId = null) {
     let title = '最新文章';
-    if (tagName) title = `標籤：${tagName}`;
+    if (tagName) title = `${tagName}`;
     if (userId) title = '歷史文章';
 
     appContainer.innerHTML = `
-        <div class="mb-8 flex justify-between items-center">
+        <div class="sticky top-0 z-30 bg-white flex justify-between items-center py-3 mb-2 border-b border-gray-100">
             <h1 class="text-3xl font-bold text-gray-900">${title}</h1>
             ${(appState.user && appState.userProfile?.canPost !== false) ? `<button onclick="openCreatePostModal()" class="bg-black text-white px-4 py-2 rounded hover:bg-gray-800 transition">撰寫新文章</button>` : ''}
         </div>
         <div class="bg-white shadow overflow-hidden sm:rounded-lg border border-gray-100">
-            <div class="overflow-x-auto">
+            <div class="overflow-x-auto overflow-y-auto max-h-[70vh]">
                 <table class="min-w-[1100px] w-full text-xs">
-                    <thead class="bg-gray-50 text-gray-600 text-xs">
+                    <thead class="bg-gray-50 text-gray-600 text-xs sticky top-0 z-20">
                         <tr>
                             <th class="text-left font-medium px-4 py-3 whitespace-nowrap">序號</th>
                             <th class="text-left font-medium px-4 py-3 whitespace-nowrap">暱稱</th>
@@ -487,7 +504,9 @@ async function renderHome(tagName = null, userId = null) {
                 : (post.content || '').toString();
             const summary = summaryRaw.length > 60 ? summaryRaw.substring(0, 60) + '...' : summaryRaw;
             const viewCount = Number.isFinite(post.viewCount) ? post.viewCount : 0;
-            const rating = Number.isFinite(post.ratingAvg) && post.ratingAvg > 0 ? post.ratingAvg.toFixed(1) : '-';
+            const ratingAvgStr = Number.isFinite(post.ratingAvg) && post.ratingAvg > 0 ? post.ratingAvg.toFixed(1) : '-';
+            const ratingCountNum = Number.isFinite(post.ratingCount) && post.ratingCount > 0 ? post.ratingCount : 0;
+            const ratingDisplay = `${ratingAvgStr}/${ratingCountNum}`;
             
             // Author Avatar Logic
             const authorName = (post.authorName || '未知').toString();
@@ -530,7 +549,7 @@ async function renderHome(tagName = null, userId = null) {
                     </td>
                     <td class="px-4 py-3 text-right text-gray-700 tabular-nums">${viewCount}</td>
                     <td class="px-4 py-3 text-right text-gray-700 tabular-nums" id="post-comment-count-${post.id}">-</td>
-                    <td class="px-4 py-3 text-right text-gray-700 tabular-nums">${rating}</td>
+                    <td class="px-4 py-3 text-right text-gray-700 tabular-nums">${ratingDisplay}</td>
                     <td class="px-4 py-3">
                         <div class="flex items-center space-x-3">
                             <a class="text-indigo-600 hover:text-indigo-500 font-medium" href="#post/${post.id}">開啟</a>
@@ -592,7 +611,7 @@ async function incrementPostViewCount(postId) {
 // --- 文章詳情 ---
 async function renderPost(postId) {
     appContainer.innerHTML = `
-        <div class="max-w-3xl mx-auto">
+        <div class="w-full">
             <div id="post-content" class="bg-white shadow overflow-hidden sm:rounded-lg mb-8 p-6 min-h-[300px]">
                 <div class="animate-pulse space-y-4">
                     <div class="h-8 bg-gray-200 rounded w-3/4"></div>
@@ -664,13 +683,21 @@ async function renderPost(postId) {
             `;
         }
 
+        // Store post context for comments avatar fallback
+        appState.postContext = {
+            uid: post.authorId,
+            avatarUrl: post.authorAvatarDataUrl || post.authorPhotoURL
+        };
+
+        const authorAvatarUrl = post.authorAvatarDataUrl || post.authorPhotoURL;
+
         document.getElementById('post-content').innerHTML = `
             <div class="mb-6">
                 <h1 class="text-3xl font-bold text-gray-900 mb-2">${post.title}</h1>
                 <div class="flex items-center text-sm text-gray-500">
-                    ${post.authorAvatarDataUrl 
-                        ? `<img src="${post.authorAvatarDataUrl}" class="h-8 w-8 rounded-full object-cover mr-2 border border-gray-200">`
-                        : `<div class="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 mr-2 border border-gray-200">${(post.authorName || post.authorEmail || 'U')[0].toUpperCase()}</div>`
+                    ${authorAvatarUrl 
+                        ? `<img src="${authorAvatarUrl}" class="h-8 w-8 rounded-full object-cover mr-2">`
+                        : `<div class="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 mr-2">${(post.authorName || post.authorEmail || 'U')[0].toUpperCase()}</div>`
                     }
                     <span class="font-medium text-gray-900 mr-2">${post.authorName || post.authorEmail.split('@')[0]}</span>
                     <span>• ${date}</span>
@@ -704,24 +731,130 @@ async function loadComments(postId) {
     }
 
     commentsList.innerHTML = '';
-    snapshot.forEach(doc => {
+    
+    appState.avatarCache = appState.avatarCache || {};
+    appState.userDisplayNameCache = appState.userDisplayNameCache || {};
+    let commentsHtml = '';
+
+    const getDisplayNameForUid = async (uid) => {
+        if (!uid) return '';
+        if (appState.userDisplayNameCache[uid]) return appState.userDisplayNameCache[uid];
+        if (appState.user && uid === appState.user.uid) {
+            const me = getCurrentNickname();
+            if (me) {
+                appState.userDisplayNameCache[uid] = me;
+                return me;
+            }
+        }
+        try {
+            const userDoc = await firebase.firestore().collection('users').doc(uid).get();
+            if (!userDoc.exists) return uid.slice(0, 6);
+            const userData = userDoc.data() || {};
+            const name = userData.nickname || (userData.email ? userData.email.split('@')[0] : '') || uid.slice(0, 6);
+            appState.userDisplayNameCache[uid] = name;
+            if (userData.email) appState.userDisplayNameCache[userData.email] = name;
+            return name;
+        } catch {
+            return uid.slice(0, 6);
+        }
+    };
+
+    for (const doc of snapshot.docs) {
         const comment = doc.data();
         const date = comment.createdAt ? new Date(comment.createdAt.seconds * 1000).toLocaleString() : '剛剛';
         const canDelete = appState.user && !comment.deletedAt && (appState.user.uid === comment.authorId || appState.role === 'admin' || appState.role === 'moderator');
         const deletedLabel = comment.deletedAt ? '此留言已被刪除' : '';
-        commentsList.innerHTML += `
+        const likeCount = comment.likeCount || 0;
+        const isLiked = appState.user && (comment.likedBy || []).includes(appState.user.uid);
+        const likedBy = Array.isArray(comment.likedBy) ? comment.likedBy : [];
+        
+        let avatarUrl = comment.authorAvatarDataUrl || comment.authorPhotoURL;
+        if (!avatarUrl && appState.user && comment.authorId === appState.user.uid) {
+             avatarUrl = appState.userProfile?.avatarDataUrl || appState.user.photoURL;
+        }
+        if (!avatarUrl && appState.postContext && comment.authorId === appState.postContext.uid) {
+            avatarUrl = appState.postContext.avatarUrl;
+        }
+        
+        // Fetch missing avatar
+        if (!avatarUrl) {
+            // 1. Check ID Cache
+            if (comment.authorId && appState.avatarCache[comment.authorId]) {
+                avatarUrl = appState.avatarCache[comment.authorId];
+            }
+            // 2. Check Email Cache
+            else if (comment.authorEmail && appState.avatarCache[comment.authorEmail]) {
+                 avatarUrl = appState.avatarCache[comment.authorEmail];
+            }
+            
+            // 3. Fetch by ID
+            if (!avatarUrl && comment.authorId) {
+                try {
+                    const userDoc = await firebase.firestore().collection('users').doc(comment.authorId).get();
+                    if (userDoc.exists) {
+                        const userData = userDoc.data();
+                        const fetchedUrl = userData.avatarDataUrl || userData.photoURL;
+                        if (fetchedUrl) {
+                            appState.avatarCache[comment.authorId] = fetchedUrl;
+                            if (comment.authorEmail) appState.avatarCache[comment.authorEmail] = fetchedUrl;
+                            avatarUrl = fetchedUrl;
+                        }
+                    }
+                } catch (e) { console.error('Error fetching avatar by ID:', e); }
+            }
+            
+            // 4. Fetch by Email (fallback if ID fetch failed or returned nothing)
+            if (!avatarUrl && comment.authorEmail) {
+                 try {
+                    const userSnapshot = await firebase.firestore().collection('users').where('email', '==', comment.authorEmail).limit(1).get();
+                    if (!userSnapshot.empty) {
+                        const userData = userSnapshot.docs[0].data();
+                        const fetchedUrl = userData.avatarDataUrl || userData.photoURL;
+                        if (fetchedUrl) {
+                            appState.avatarCache[comment.authorEmail] = fetchedUrl;
+                            if (comment.authorId) appState.avatarCache[comment.authorId] = fetchedUrl;
+                            avatarUrl = fetchedUrl;
+                        }
+                    }
+                 } catch (e) { console.error('Error fetching avatar by Email:', e); }
+            }
+        }
+
+        let likeTooltip = '';
+        if (likedBy.length > 0) {
+            const maxNames = 20;
+            const shownUids = likedBy.slice(0, maxNames);
+            const names = (await Promise.all(shownUids.map(getDisplayNameForUid))).filter(Boolean);
+            const more = likedBy.length > maxNames ? ` …等${likedBy.length}人` : '';
+            likeTooltip = `點讚：${names.join('、')}${more}`;
+        } else {
+            likeTooltip = '尚無點讚';
+        }
+        
+        commentsHtml += `
             <div class="bg-gray-50 p-4 rounded-lg">
-                <div class="flex justify-between items-start">
-                    <span class="font-medium text-sm text-gray-900">${comment.authorName || comment.authorEmail.split('@')[0]}</span>
-                    <div class="flex items-center space-x-2">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center">
+                        <div class="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-600 mr-2 overflow-hidden">
+                             ${avatarUrl ? `<img src="${avatarUrl}" class="h-full w-full object-cover">` : (comment.authorName || 'U')[0].toUpperCase()}
+                        </div>
+                        <span class="font-medium text-sm text-gray-900 mr-2">${comment.authorName || comment.authorEmail.split('@')[0]}</span>
                         <span class="text-xs text-gray-500">${date}</span>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                         <button onclick="toggleCommentLike('${postId}', '${doc.id}')" title="${escapeHtml(likeTooltip)}" class="flex items-center space-x-1 ${isLiked ? 'text-red-500' : 'text-gray-400 hover:text-red-500'} transition-colors">
+                            <svg class="w-4 h-4" fill="${isLiked ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                            <span class="text-xs font-medium">${likeCount > 0 ? likeCount : '讚'}</span>
+                        </button>
                         ${canDelete ? `<button onclick="deleteComment('${postId}', '${doc.id}')" class="text-xs text-red-600 hover:text-red-800">刪除</button>` : ''}
                     </div>
                 </div>
-                ${comment.deletedAt ? `<p class="text-gray-400 mt-1 text-sm">${deletedLabel}</p>` : `<p class="text-gray-700 mt-1 text-sm">${comment.content}</p>`}
+                ${comment.deletedAt ? `<p class="text-gray-400 mt-1 text-sm pl-10">${deletedLabel}</p>` : `<p class="text-gray-700 mt-1 text-sm pl-10">${comment.content}</p>`}
             </div>
         `;
-    });
+    }
+    
+    commentsList.innerHTML = commentsHtml;
 }
 
 // --- 評分系統 ---
@@ -1301,11 +1434,11 @@ function openCreatePostModal() {
     const tagOptions = appState.openTabs.map(t => `<option value="${t.name}">${t.name}</option>`).join('');
 
     modal.innerHTML = `
-        <div class="bg-white w-[80%] h-[80%] rounded-lg shadow-lg p-8 overflow-y-auto relative">
+        <div class="bg-white w-[94%] h-[80%] rounded-lg shadow-lg p-8 overflow-y-auto relative">
             <button onclick="closeCreatePostModal()" class="absolute top-4 right-4 text-gray-500 hover:text-black">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
             </button>
-            <div class="max-w-4xl mx-auto">
+            <div class="w-full mx-auto">
                 <div class="flex items-baseline space-x-6 mb-6">
                     <h1 class="text-2xl font-bold text-gray-900">發布新文章</h1>
                 </div>
@@ -1705,6 +1838,33 @@ async function logout() {
     window.location.reload();
 }
 
+async function ensureUserCanPost() {
+    if (!appState.user) throw new Error('請先登入');
+    const db = firebase.firestore();
+    const ref = db.collection('users').doc(appState.user.uid);
+    const snap = await ref.get();
+    if (!snap.exists) {
+        await ref.set({
+            email: appState.user.email,
+            role: 'user',
+            canPost: true,
+            canComment: true,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        appState.role = 'user';
+        appState.userProfile = { email: appState.user.email, role: 'user', canPost: true, canComment: true };
+        return;
+    }
+    const data = snap.data() || {};
+    if (data.canPost === false) {
+        throw new Error('您的帳號目前無法發文');
+    }
+    if (typeof data.canPost === 'undefined') {
+        await ref.set({ canPost: true }, { merge: true });
+        appState.userProfile = { ...(appState.userProfile || {}), canPost: true };
+    }
+}
+
 async function submitPost(e) {
     e.preventDefault();
     const title = document.getElementById('title').value;
@@ -1726,6 +1886,7 @@ async function submitPost(e) {
     }
 
     try {
+        await ensureUserCanPost();
         await firebase.firestore().collection('posts').add({
             title,
             content,
@@ -1743,9 +1904,17 @@ async function submitPost(e) {
             ratingCount: 0
         });
         closeCreatePostModal();
-        window.location.hash = '/';
+        if (appState.currentRoute === '' || appState.currentRoute === '/') {
+            renderHome(); // 當前就在首頁時，直接重新渲染列表
+        } else {
+            window.location.hash = '/'; // 其他頁面則導回首頁
+        }
     } catch (error) {
-        alert('發布失敗: ' + error.message);
+        if (error.code === 'permission-denied') {
+            alert('發布失敗: 權限不足，請確認您已登入，且帳號具備發文權限。');
+        } else {
+            alert('發布失敗: ' + (error.message || '請稍後再試'));
+        }
     }
 }
 
@@ -1796,6 +1965,9 @@ async function submitComment(postId) {
             authorId: appState.user.uid,
             authorEmail: appState.user.email,
             authorName: appState.userProfile?.nickname || appState.user.displayName || appState.user.email.split('@')[0],
+            authorAvatarDataUrl: appState.userProfile?.avatarDataUrl || appState.user.photoURL || null,
+            likedBy: [],
+            likeCount: 0,
             deletedAt: null,
             deletedByRole: null,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -1804,6 +1976,48 @@ async function submitComment(postId) {
         loadComments(postId); // Refresh comments
     } catch (error) {
         alert('留言失敗: ' + error.message);
+    }
+}
+
+async function toggleCommentLike(postId, commentId) {
+    console.log('toggleCommentLike called', postId, commentId);
+    if (!appState.user) {
+        alert('請先登入以點讚');
+        return;
+    }
+    const uid = appState.user.uid;
+    const ref = firebase.firestore().collection('posts').doc(postId).collection('comments').doc(commentId);
+    
+    try {
+        await firebase.firestore().runTransaction(async (transaction) => {
+            const doc = await transaction.get(ref);
+            if (!doc.exists) throw "Document does not exist!";
+            
+            const data = doc.data();
+            const likedBy = data.likedBy || [];
+            let newLikedBy;
+            let increment = 0;
+            
+            if (likedBy.includes(uid)) {
+                newLikedBy = likedBy.filter(id => id !== uid);
+                increment = -1;
+            } else {
+                newLikedBy = [...likedBy, uid];
+                increment = 1;
+            }
+            
+            const newLikeCount = Math.max(0, (data.likeCount || 0) + increment);
+
+            transaction.update(ref, { 
+                likedBy: newLikedBy,
+                likeCount: newLikeCount
+            });
+        });
+        console.log('Transaction success');
+        loadComments(postId);
+    } catch (error) {
+        console.error('Like error:', error);
+        alert('點讚失敗: ' + error.message);
     }
 }
 

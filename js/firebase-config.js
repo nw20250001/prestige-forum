@@ -29,8 +29,8 @@ try {
         const db = firebase.firestore();
         const auth = firebase.auth();
         
-        // 如果有 analytics SDK，則初始化
-        if (typeof firebase.analytics === 'function') {
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '::1';
+        if (!isLocalhost && typeof firebase.analytics === 'function') {
             firebase.analytics();
         }
     }
