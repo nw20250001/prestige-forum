@@ -13,11 +13,14 @@ const appState = {
     initialRouteProcessed: false,
 };
 
-// Ensure "技術論壇" is restored if missing
+// Ensure "技術論壇" and "產品論壇" are restored if missing
 if (!appState.openTabs.some(t => t.name === '技術論壇')) {
     appState.openTabs.push({ name: '技術論壇', route: '#tag/技術論壇' });
-    localStorage.setItem('openTabs', JSON.stringify(appState.openTabs));
 }
+if (!appState.openTabs.some(t => t.name === '產品論壇')) {
+    appState.openTabs.push({ name: '產品論壇', route: '#tag/產品論壇' });
+}
+localStorage.setItem('openTabs', JSON.stringify(appState.openTabs));
 
 // DOM Elements
 const appContainer = document.getElementById('app');

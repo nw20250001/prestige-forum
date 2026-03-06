@@ -29,10 +29,10 @@
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
 </head>
-<body class="bg-white text-primary-black font-sans min-h-screen flex flex-col">
+<body class="bg-white text-primary-black font-sans h-screen overflow-hidden flex flex-col">
 
     <!-- Navigation -->
-    <nav class="border-b border-border-gray bg-white sticky top-0 z-50">
+    <nav class="border-b border-border-gray bg-white flex-shrink-0 z-50">
         <div class="mx-auto w-[94%]">
             <div class="flex justify-between h-16 items-center">
                 <div class="flex-shrink-0 flex items-center cursor-pointer" onclick="window.location.hash=''">
@@ -50,17 +50,19 @@
     </nav>
 
     <!-- Main Content Area -->
-    <main id="app" class="flex-grow mx-auto py-8 w-[94%]">
-        <!-- Content injected by Router -->
-        <div class="animate-pulse space-y-4">
-            <div class="h-4 bg-gray-200 rounded w-3/4"></div>
-            <div class="h-4 bg-gray-200 rounded"></div>
-            <div class="h-4 bg-gray-200 rounded w-5/6"></div>
-        </div>
-    </main>
+    <div class="flex-grow w-full overflow-y-auto relative z-0">
+        <main id="app" class="mx-auto py-8 w-[94%]">
+            <!-- Content injected by Router -->
+            <div class="animate-pulse space-y-4">
+                <div class="h-4 bg-gray-200 rounded w-3/4"></div>
+                <div class="h-4 bg-gray-200 rounded"></div>
+                <div class="h-4 bg-gray-200 rounded w-5/6"></div>
+            </div>
+        </main>
+    </div>
 
     <!-- Footer -->
-    <footer class="bg-primary-black text-white py-8 mt-auto">
+    <footer class="bg-primary-black text-white py-8 flex-shrink-0 z-50 relative">
         <div class="mx-auto w-[94%] flex justify-between items-center">
             <p class="text-sm text-gray-400">&copy; 2026 Prestige Forum. All rights reserved.</p>
             <div class="text-sm text-gray-500 space-x-4">
